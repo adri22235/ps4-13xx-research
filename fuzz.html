@@ -1,0 +1,127 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Fuzzer LLInt: Profundización en NewTarget</title>
+</head>
+<body style="background:#111; color:#0f0; font-family:monospace; font-size:13px; padding:10px;">
+<h1>Fuzzer LLInt: Profundización en NewTarget</h1>
+<button onclick="runTest('new_target_proxy_getter')">1. NewTarget con Getter Reactivo</button>
+<button onclick="runTest('new_target_type_confusion')">2. Confusión de Prototipo Cruzado (Float64)</button>
+<button onclick="clearLog()">Limpiar log</button>
+<button onclick="sendLog()">Enviar log al servidor</button>
+<pre id="out" style="white-space:pre-wrap; word-wrap:break-word; background:#222; padding:5px; min-height:300px;"></pre>
+<script>
+var out = document.getElementById("out");
+var logLines = [];
+
+function log(msg) {
+    var line = "[" + new Date().toISOString().slice(11,19) + "] " + msg;
+    logLines.push(line);
+    out.textContent += line + "\n";
+    out.scrollTop = out.scrollHeight;
+}
+function clearLog() { logLines = []; out.textContent = ""; }
+
+function sendLog() {
+    if (logLines.length === 0) return;
+    var data = logLines.join("\n") + "\n";
+    try {
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "/log", true);
+        xhr.setRequestHeader("Content-Type", "text/plain");
+        xhr.send(data);
+        logLines = [];
+    } catch (e) {}
+}
+
+function runTest(name) {
+    log("=== Iniciando: " + name + " ===");
+    try {
+        switch(name) {
+            case "new_target_proxy_getter": testNewTargetProxyGetter(); break;
+            case "new_target_type_confusion": testNewTargetTypeConfusion(); break;
+            default: log("Prueba desconocida");
+        }
+    } catch (e) {
+        log("Resultado: " + e.name + ": " + e.message);
+    }
+    sendLog();
+}
+
+// 1. NewTarget con un Proxy que intercepta la lectura del prototipo a mitad de Reflect.construct
+function testNewTargetProxyGetter() {
+    var arr = new Uint8Array([10, 20, 30]);
+    var err = "";
+
+    Object.defineProperty(arr.constructor, Symbol.species, {
+        get: function() {
+            log("[Trampa] Species invocado. Configurando Proxy de NewTarget...");
+            return function(length) {
+                
+                // Creamos una función constructora ordinaria
+                var TargetBase = function() {};
+                
+                // Envolvemos la función en un Proxy para interceptar el acceso a sus propiedades
+                var reactiveNewTarget = new Proxy(TargetBase, {
+                    get: function(target, prop) {
+                        if (prop === "prototype") {
+                            log("[Trampa Activa] El motor consultó el .prototype durante la instanciación nativa.");
+                            // Aquí inyectamos un efecto secundario: devolvemos un prototipo modificado
+                            return Uint8Array.prototype;
+                        }
+                        return target[prop];
+                    }
+                });
+
+                // Detonamos la construcción pasando el Proxy activo como NewTarget
+                return Reflect.construct(Uint8Array, [length], reactiveNewTarget);
+            };
+        },
+        configurable: true
+    });
+
+    try {
+        var result = arr.map(function(x) { return x; });
+        log("Map finalizado con Proxy NewTarget. Longitud: " + result.length + " | Tipo: " + Object.prototype.toString.call(result));
+    } catch (e) {
+        err = e.name + ": " + e.message;
+        log("Capturado en Proxy NewTarget: " + err);
+    }
+}
+
+// 2. Confusión de Prototipo Cruzado: Raíz Uint8Array, Prototipo Float64Array
+function testNewTargetTypeConfusion() {
+    var arr = new Uint8Array([5, 10, 15]);
+    var err = "";
+
+    Object.defineProperty(arr.constructor, Symbol.species, {
+        get: function() {
+            log("[Trampa] Species invocado. Configurando confusión Float64...");
+            return function(length) {
+                var FakeTarget = function() {};
+                // Obligamos al objeto Uint8Array resultante a heredar los métodos de Float64Array
+                FakeTarget.prototype = Float64Array.prototype;
+
+                return Reflect.construct(Uint8Array, [length], FakeTarget);
+            };
+        },
+        configurable: true
+    });
+
+    try {
+        var result = arr.map(function(x) { return x; });
+        log("Map finalizado en Confusión de Tipo. Longitud reportada: " + result.length);
+        log("Tipo de estructura devuelta: " + Object.prototype.toString.call(result));
+        
+        // Intentamos invocar un método heredado de Float64Array sobre los bytes de Uint8Array
+        // para ver si el LLInt ejecuta una lectura desalineada de 8 bytes
+        log("Probando lectura indexada en caliente: " + result[0]);
+    } catch (e) {
+        err = e.name + ": " + e.message;
+        log("Capturado en Confusión Float64: " + err);
+    }
+}
+</script>
+</body>
+</html>
