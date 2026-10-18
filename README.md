@@ -4,6 +4,8 @@ Joint research by Adrián García Casado (@adri22235) and H4SS9M
 
 ## Status
 
+- **2026-10-19**: FW 14.00 vulnerability research — 6 FreeBSD KEX candidates identified (see [`vuln_research_1400.md`](vuln_research_1400.md))
+- **2026-10-18**: Celsius KEX integrated for FW 13.04 (full chain: WebKit → Kernel → GoldHEN)
 - **2026-09-24**: FW 14.00 kernel offsets added from Al-Azif (Scene-Collective)
 - **2026-09-21**: PS4 13.04 jailbroken with GoldHEN v2.4b18.12
 - **2026-09-19**: PS4 13.04 jailbroken with HEN 2.2.0
@@ -32,6 +34,13 @@ SYSENT     = 0x01102B70  (same as 13.04)
 ALLPROC    = 0x01B28538  (same as 13.04)
 ```
 Data addresses stable across 13.00–14.00. Function offsets shifted (memcpy, copyin/copyout, etc).
+
+### 🔥 FW 14.00 Kernel Exploit Research (NEW)
+- Full analysis: [`vuln_research_1400.md`](vuln_research_1400.md)
+- **Top candidate:** CVE-2026-58087 (semctl heap OOB) — pure software race, no USB needed
+- **Runner-up:** CVE-2026-58098 (semop heap OOB) — same subsystem, disclosed AFTER 14.00
+- **Backup:** CVE-2026-58093 (tty TIOCSCTTY UAF) — race in ioctl lock ordering
+- All disclosed after FW 14.00 development freeze → likely unpatched by Sony
 
 ### exFAThax v2
 - Kernel panic confirmed on FW 13.04

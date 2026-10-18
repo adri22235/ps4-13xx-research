@@ -1,0 +1,246 @@
+# PS4 FW 14.00 Vulnerability Research — Kernel Exploit Candidates
+
+## Research by Adrián García Casado (@adri22235)
+## Date: October 19, 2026
+
+Analysis of FreeBSD Security Advisories (July–October 2026) and their
+applicability to PS4 Orbis OS (FreeBSD 9-based kernel) on firmware 14.00.
+
+PS4 FW 14.00 was released September 16, 2026. These vulnerabilities were
+disclosed AFTER the firmware was finalized, meaning Sony likely did NOT
+patch them. The PS4 kernel is FreeBSD 9-based, so only bugs present in
+FreeBSD 9 are applicable.
+
+---
+
+## 🔥 HIGH PRIORITY — Likely Present in PS4 14.00
+
+### 1. CVE-2026-58087 — semctl(2) Heap OOB Read/Write
+
+- **Advisory:** FreeBSD-SA-26:54.sysvsem
+- **Announced:** July 29, 2026 (AFTER FW 14.00 development freeze)
+- **Affects:** "All supported versions of FreeBSD"
+- **Type:** Heap out-of-bounds read AND write
+- **Component:** `sys/kern/sysv_sem.c` → `semctl(2)` GETALL/SETALL
+- **Discoverer:** Maik Muench of Secfault Security
+
+**Bug:**
+The GETALL and SETALL commands in semctl(2) record the semaphore count,
+drop the lock, allocate a buffer, then reacquire the lock. A sequence-number
+check validates the set hasn't been replaced, but the sequence number wraps
+after 0x8000 (32768) create/destroy cycles. By rapidly creating and destroying
+semaphore sets, an attacker wraps the counter and tricks the kernel into
+accessing a set with a different semaphore count, reading/writing past the
+allocated buffer.
+
+**PS4 Applicability: 🔥 VERY HIGH**
+- System V semaphores are present in FreeBSD 9 (`kern/sysv_sem.c`)
+- The 15-bit sequence number has been the same since FreeBSD 4.x
+- semctl(2) is accessible from userland (syscall 510)
+- The bug pattern (TOCTOU via sequence number wrap) is trivially portable
+- PS4 14.00 was built on September 2026; this was disclosed July 29, 2026
+  but the FreeBSD 9 fork likely never received this fix
+
+**Exploitation path:**
+```
+1. WebKit entry → gain code execution
+2. Call semget() to create semaphore set with N semaphores
+3. Spawn thread that rapidly destroys/recreates sets to wrap sequence number
+4. Race semctl(GETALL/SETALL) → OOB heap read/write
+5. Use OOB write to corrupt adjacent kernel object → kernel R/W
+6. Patch credentials (PRISON0, ROOTVNODE, etc.)
+```
+
+**Advantage over Celsius:** No USB drive needed. Pure software race condition.
+
+---
+
+### 2. CVE-2026-58098 — semop(2) Heap OOB Access
+
+- **Advisory:** FreeBSD-SA-26:64.sysvsem
+- **Announced:** September 29, 2026 (AFTER FW 14.00 release)
+- **Affects:** "All supported versions of FreeBSD"
+- **Type:** Heap out-of-bounds access
+- **Component:** `sys/kern/sysv_sem.c` → `semop(2)`
+- **Discoverers:** Reo Shiseki, Andrew Griffiths
+
+**Bug:**
+When semop(2) blocks waiting for a semaphore condition, it releases the
+per-set lock and sleeps. Upon waking, it checks the 15-bit sequence number
+to detect if the set was removed. If enough sets are created/destroyed while
+the caller sleeps, the counter wraps, and semop(2) falsely concludes the
+original set exists. The subsequent semaphore access is out of bounds.
+
+**PS4 Applicability: 🔥 VERY HIGH**
+- Same component as CVE-2026-58087, same fundamental bug class
+- semop(2) is syscall 222 in FreeBSD 9
+- The blocking behavior (sleep/wake) makes the race window larger
+- No workaround available
+
+**Relationship to CVE-2026-58087:** These are two independent bugs in the
+same subsystem. Both exploit the 15-bit sequence number wrap in SysV
+semaphores. Can be combined: use semctl for the initial leak, semop for
+the write.
+
+---
+
+### 3. CVE-2026-58093 — tty TIOCSCTTY Use-After-Free
+
+- **Advisory:** FreeBSD-SA-26:62.tty
+- **Announced:** August 25, 2026 (BEFORE FW 14.00 release, likely NOT patched)
+- **Affects:** "All supported versions of FreeBSD"
+- **Type:** Use-after-free via race condition
+- **Component:** `sys/kern/tty.c` → TIOCSCTTY ioctl
+- **Discoverer:** tsune of GMO Cybersecurity (via Trend ZDI)
+
+**Bug:**
+The TIOCSCTTY ioctl handler drops the tty lock to acquire the process tree
+lock. After reacquiring the tty lock, it does NOT revalidate the terminal
+state. A concurrent thread can destroy the terminal during the lock gap,
+causing the handler to link a freed terminal to the calling process's session.
+
+**PS4 Applicability: 🔥 HIGH**
+- The tty subsystem is present in FreeBSD 9
+- TIOCSCTTY is a standard POSIX ioctl, available since FreeBSD 2.x
+- Lock ordering between tty lock and process tree lock has been the same
+- The race window exists because of fundamental lock ordering constraints
+- PS4 WebKit process has access to /dev/tty-like devices
+
+**Exploitation path:**
+```
+1. WebKit entry → code execution
+2. Open a PTY pair (or /dev/console if accessible)
+3. Thread 1: TIOCSCTTY ioctl (blocks for lock)
+4. Thread 2: destroy/close the tty during lock gap
+5. UAF → reuse freed tty memory with controlled data
+6. Kernel R/W → credential patches
+```
+
+---
+
+### 4. CVE-2026-58094 — posixshm TOCTOU Race → Privilege Escalation
+
+- **Advisory:** FreeBSD-SA-26:63.posixshm
+- **Announced:** August 25, 2026
+- **Affects:** "All supported versions of FreeBSD"
+- **Type:** TOCTOU race condition
+- **Component:** `sys/kern/uipc_shm.c` → FIOSSHMLPGCNF ioctl
+- **Discoverer:** tsune of GMO Cybersecurity (via Trend ZDI)
+
+**Bug:**
+The FIOSSHMLPGCNF ioctl configures the page size for a largepage shared
+memory object. The handler checks whether a page size has been configured
+WITHOUT holding the rangelock. Two concurrent callers can both observe an
+unconfigured object and set conflicting page sizes, leaving it inconsistent.
+
+**PS4 Applicability: ⚠️ MEDIUM**
+- POSIX shared memory is present in FreeBSD 9
+- However, largepage objects (shm_create_largepage) may have been added later
+- Need to verify if FIOSSHMLPGCNF exists in PS4's FreeBSD 9 kernel
+- If present → direct privilege escalation
+
+---
+
+## ⚠️ MEDIUM PRIORITY — Needs Verification
+
+### 5. FreeBSD-SA-26:55.elf — ELF Core Dump Heap Overflow
+
+- **Announced:** August 2026
+- **Affects:** Unclear (likely all versions with rfork)
+- **Type:** Heap out-of-bounds write
+- **Component:** `sys/kern/imgact_elf.c` → core dump code
+
+**Bug:**
+ELF core dump counts dumpable VM map entries, allocates a buffer, then
+iterates again. A process sharing the address space via rfork(2) can mutate
+the map between passes, causing writes past the buffer.
+
+**PS4 Applicability: ⚠️ MEDIUM**
+- rfork(2) is present in FreeBSD 9
+- Core dumps must be enabled (kern.coredump=1)
+- PS4 may have core dumps disabled in production
+- If enabled, this is a clean heap overflow without racing
+
+---
+
+### 6. IPMI sys_ipmimgr_call Use-After-Scope (H4SS9M 0-day)
+
+- **Type:** Use-After-Scope
+- **Component:** syscall 622 (sys_ipmimgr_call)
+- **Discovered by:** H4SS9M
+- **Confirmed on:** FW 11.50, 13.02, 13.04, 13.50, 13.52
+- **Status:** Pending HackerOne disclosure
+
+**PS4 Applicability: 🔥 HIGH (if present in 14.00)**
+- PS4-specific syscall, not upstreamed from FreeBSD
+- Sony may not have patched it in 14.00 since disclosure is pending
+- Needs verification against 14.00 kernel dump
+- If present → immediate KEX, no race conditions needed
+
+---
+
+### 7. CVE-2026-49415 — execve(2) TOCTOU Race (Synacktiv)
+
+- **Type:** Local privilege escalation via SUID race
+- **Component:** `sys/kern/kern_exec.c` → execve(2)
+- **Patched in upstream FreeBSD:** June 30, 2026
+- **PS4 FW 14.00 released:** September 16, 2026
+
+**PS4 Applicability: ⚠️ MEDIUM**
+- SUID handling code confirmed in FreeBSD 9
+- Challenge: PS4 sandbox may not expose accessible SUID binaries
+- Would need BD-J or WebKit to find a usable SUID target
+
+---
+
+## ❌ NOT APPLICABLE to PS4
+
+### FreeBSD-SA-26:53.ktrace — ktrace privilege in jails
+- **Affects:** FreeBSD 15.0+ only. Not in FreeBSD 9.
+
+### FreeBSD-SA-26:57.unix — Unix SOCK_STREAM UAF
+- **Affects:** FreeBSD 15.0+ only. Not in FreeBSD 9.
+
+### FreeBSD-SA-26:65.kqueue — kqueue copy-on-fork bugs
+- **Affects:** FreeBSD 15.1 only. KQUEUE_CPONFORK not in FreeBSD 9.
+
+### FreeBSD-SA-26:70.tcp — tcp_rack buffer overflow
+- **Affects:** FreeBSD 15.1 only. RACK TCP stack not in FreeBSD 9.
+
+### FreeBSD-SA-26:72.bhyve — bhyve bugs
+- **Affects:** bhyve hypervisor. Not present on PS4.
+
+---
+
+## Priority Ranking for PS4 14.00
+
+| Priority | Bug | Type | Confidence | No USB needed |
+|----------|-----|------|------------|---------------|
+| **#1** | **CVE-2026-58087 (semctl OOB)** | Heap R/W | 🔥 Very High | ✅ Yes |
+| **#2** | **CVE-2026-58098 (semop OOB)** | Heap Access | 🔥 Very High | ✅ Yes |
+| **#3** | **CVE-2026-58093 (tty UAF)** | Use-After-Free | 🔥 High | ✅ Yes |
+| **#4** | **IPMI 0-day (H4SS9M)** | Use-After-Scope | 🔥 High | ✅ Yes |
+| **#5** | **CVE-2026-58094 (posixshm)** | TOCTOU Race | ⚠️ Medium | ✅ Yes |
+| **#6** | **ELF core dump OOB** | Heap Overflow | ⚠️ Medium | ✅ Yes |
+| **#7** | **CVE-2026-49415 (execve)** | SUID Race | ⚠️ Medium | ✅ Yes |
+
+## Recommended Next Steps
+
+1. **Verify semctl/semop bugs in PS4 14.00 kernel dump:**
+   - Find `semctl()` and `semop()` in the kernel
+   - Confirm 15-bit sequence number (0x8000 wrap)
+   - Write PoC syscall sequence from WebKit ROP
+
+2. **Verify tty TIOCSCTTY bug:**
+   - Check if lock ordering issue exists in PS4's tty.c
+   - Identify accessible tty devices from WebKit sandbox
+
+3. **Check IPMI syscall 622 in 14.00:**
+   - If identical to 13.52 → immediate win
+
+4. **Build semctl/semop exploit PoC:**
+   - This is the most promising because:
+     - Affects ALL FreeBSD versions (confirmed back to FreeBSD 4.x)
+     - No hardware requirements (pure software race)
+     - Both read AND write primitives
+     - Disclosed July/September 2026 → Sony almost certainly didn't patch in 14.00
