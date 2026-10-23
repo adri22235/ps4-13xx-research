@@ -45,11 +45,25 @@ allocated buffer.
 ```
 1. WebKit entry → gain code execution
 2. Call semget() to create semaphore set with N semaphores
-3. Spawn thread that rapidly destroys/recreates sets to wrap sequence number
-4. Race semctl(GETALL/SETALL) → OOB heap read/write
-5. Use OOB write to corrupt adjacent kernel object → kernel R/W
-6. Patch credentials (PRISON0, ROOTVNODE, etc.)
+3. Spawn thread that rapidly destroys/recreates sets to wrap sequence number (0x8000 wrap)
+4. Race semctl(GETALL/SETALL) via syscall 510 → OOB heap read/write
+5. Use OOB read for KASLR leak, OOB write to corrupt adjacent kernel object → kernel R/W
+6. Patch credentials (PRISON0 = 0x0111FA18, ROOTVNODE = 0x02136E90, etc.)
 ```
+
+**Technical Specifications (Syscall 510 Architecture):**
+- **Kernel dispatch:** `sysent[510]` at `SYSENT + (510 * sizeof(struct sysent))`
+  - FW 13.04: `SYSENT = 0x01102B70`
+  - FW 14.00: `SYSENT = 0x0110A760`
+- **Registers for semctl(2):**
+  - `RAX` = 510 (`0x1fe`)
+  - `RDI` = `semid`
+  - `RSI` = `semnum` (`0`)
+  - `RDX` = `cmd` (`GETALL = 13`, `SETALL = 12`, `IPC_RMID = 0`)
+  - `RCX` = `arg` (userspace buffer pointer)
+- **FreeBSD Mitigation (SA-26:54.sysvsem):**
+  - Expand sequence counter from 15-bit to 32-bit (`u_int32_t`).
+  - Enforce persistent mutex lock holding across memory allocation to eliminate the TOCTOU window.
 
 **Advantage over Celsius:** No USB drive needed. Pure software race condition.
 
