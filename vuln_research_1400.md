@@ -96,6 +96,23 @@ same subsystem. Both exploit the 15-bit sequence number wrap in SysV
 semaphores. Can be combined: use semctl for the initial leak, semop for
 the write.
 
+**Technical Specifications (Syscall 512 Architecture):**
+- **Kernel dispatch:** `sysent[512]` at `SYSENT + (512 * sizeof(struct sysent))`
+  - FW 13.04: `SYSENT = 0x01102B70` -> `sysent[512] = 0x01108BB0`
+  - FW 14.00: `SYSENT = 0x0110A760` -> `sysent[512] = 0x011107A0`
+- **Registers for semop(2):**
+  - `RAX` = 512 (`0x200`)
+  - `RDI` = `semid`
+  - `RSI` = `sops` (`struct sembuf *`)
+  - `RDX` = `nsops` (`size_t`)
+- **Vulnerability Mechanics:**
+  - Blocking in `msleep()` drops `sema_mtx`.
+  - Concurrent recycling (`0x8000` wraps) reuses slot.
+  - On wakeup, false positive match leads to OOB adjustment of `semval`.
+- **FreeBSD Mitigation (SA-26:64.sysvsem):**
+  - 32-bit generation sequence ID to eliminate wrap-around collision.
+  - Re-verify descriptor liveness under mutex before completing transaction.
+
 ---
 
 ### 3. CVE-2026-58093 — tty TIOCSCTTY Use-After-Free
@@ -190,6 +207,21 @@ the map between passes, causing writes past the buffer.
 - Sony may not have patched it in 14.00 since disclosure is pending
 - Needs verification against 14.00 kernel dump
 - If present → immediate KEX, no race conditions needed
+
+**Technical Specifications (Syscall 622 Architecture):**
+- **Kernel dispatch:** `sysent[622]` at `SYSENT + (622 * sizeof(struct sysent))`
+  - FW 13.04: `SYSENT = 0x01102B70` -> `sysent[622] = 0x0110B050`
+  - FW 14.00: `SYSENT = 0x0110A760` -> `sysent[622] = 0x01112C40`
+- **Kernel Implementation:** `sub_EF1E70` (sys_ipmimgr_call)
+- **Sandbox Evaluation:**
+  - Accessible directly from WebKit jail (`libkernel.sprx`).
+  - No restrictive Mandatory Access Control (MAC) or `cr_prison` jail checks enforced on this descriptor.
+- **Root Cause (Use-After-Scope):**
+  - Ephemeral stack/scope descriptor pointer retained in an asynchronous callback queue.
+  - Re-entrant invocation or return to userland leaves dangling pointer accessible to kernel dispatch.
+- **Defensive Mitigation:**
+  - Allocate command buffers persistently via `malloc(M_TEMP, M_WAITOK)`.
+  - Invalidate and deregister pending callbacks in the function epilogue before returning.
 
 ---
 
