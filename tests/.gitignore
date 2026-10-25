@@ -1,2 +1,6 @@
 test_sem_race_benchmark
 test_ipmi_struct
+test_execve_args_overflow
+test_poll_uaf_race
+test_sound_mmap_race
+*.o
