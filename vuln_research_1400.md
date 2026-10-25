@@ -284,28 +284,71 @@ a kernel Use-After-Free (UAF).
 ### 9. CVE-2026-101308 — sound(4) Buffer Resize vs mmap(2) UAF
 
 - **Advisory:** FreeBSD-SA-26:71.sound
-- **Announced:** October 14, 2026 (ONE MONTH AFTER FW 14.00 RELEASE!)
+- **Commit:** `47d2d509c6b32b3c2245748f755fbf2344351d94`
+- **Announced:** October 13-14, 2026 (ONE MONTH AFTER FW 14.00 RELEASE!)
 - **Affects:** All supported versions of FreeBSD with audio subsystem
-- **Type:** Use-After-Free via race condition
-- **Component:** `sys/dev/sound/pcm/channel.c` → `chn_resize_buffer()`
-- **Discoverer:** FreeBSD Core Security Team
+- **Type:** Use-After-Free via race condition in sleepable allocation
+- **Component:** `sys/dev/sound/pcm/buffer.c` & `sys/dev/sound/pcm/channel.c` (`sndbuf_resize()`, `chn_resizebuf()`)
+- **Discoverer / Patch Author:** Mark Johnston (FreeBSD Security Officer)
+- **Differential Revision:** https://reviews.freebsd.org/D60554
 
-**Bug:**
-When an audio channel buffer is resized, the driver verifies that the buffer is
-not currently memory-mapped. It then drops the channel mutex to allocate new
-kernel memory. During this lock window, a concurrent thread executes `mmap(2)`
-on the audio device descriptor. Because the resize routine fails to re-verify
-the `is_mapped` status after re-acquiring the lock, it frees the original buffer
-while it is actively mapped into userspace, creating a dangling pointer and UAF.
+**Bug & Structural RCA:**
+When an audio channel buffer is resized via `SNDCTL_DSP_SETFRAGMENT` or `SNDCTL_DSP_SETBLKSIZE`,
+the driver drops the channel mutex (`CHN_UNLOCK(c)`) in order to allocate the new buffer with `M_WAITOK`
+(which can sleep). Before dropping the lock, it checks that the buffer is not mapped (`CHN_F_MMAP`).
+However, during the sleep window while the lock is released:
+1. A concurrent thread invokes `mmap(2)` on `/dev/dsp0` or `/dev/audio0` with `PROT_WRITE` and `MAP_SHARED`.
+2. The page tables of the process are populated with PTEs pointing directly to the physical sound buffer.
+3. `chn_resizebuf()` wakes up, reacquires `CHN_LOCK(c)`, but **fails to re-verify `CHN_F_MMAP`**.
+4. The driver proceeds to free the old buffer memory (`free(..., M_DEVBUF)`), leaving the user process
+   with live writeable virtual memory mappings pointing to recycled kernel slab pages (Classic UAF).
 
-**PS4 Applicability: 🔥 HIGH (Confirmed Unpatched in 14.00)**
-- FW 14.00 was released on September 16, 2026.
-- This advisory was published October 14, 2026 — Sony could NOT have patched it in 14.00.
+**PS4 Applicability: 🔥 VERY HIGH (Confirmed Unpatched in 14.00)**
+- FW 14.00 was finalized and released September 16, 2026.
+- The upstream fix was authored on October 13, 2026 and published October 14, 2026.
+- Open Sound System (`sound(4)`) is a core driver present in Orbis OS for low-latency audio processing.
+- Accessible directly from userland / WebKit sandbox context.
 - Validated via lifecycle simulation: `tests/test_sound_mmap_race.c`.
 
 ---
 
-### 10. CVE-2026-49415 — execve(2) TOCTOU Race (Synacktiv)
+### 10. CVE-2026-101307 — tcp/rack PCM Integer Overflow (~512KB Remote Heap OOB Write)
+
+- **Advisory:** FreeBSD-SA-26:70.tcp
+- **Commit:** `9a406a9ec399cced14ce5d204ba3fd383544b47f`
+- **Announced:** October 12, 2026 (AFTER FW 14.00 RELEASE!)
+- **Affects:** FreeBSD network stack with RACK TCP module enabled
+- **Type:** Integer Overflow -> Underallocation -> Heap Out-Of-Bounds Write (~512 KB)
+- **Component:** `sys/netinet/tcp_stacks/rack_pcm.c` (`rack_update_pcm_ack()`)
+- **Discoverer:** Nozomi Networks Security Research
+- **Patch Author:** Michael Tuexen (Reviewed by glebius, markj)
+
+**Bug & Structural RCA:**
+In the RACK TCP stack's Path Capacity Measurement (PCM) module, incoming ACK packets expand an internal
+array of measurement statistics (`struct rack_pcm_stats`).
+When expanding the array, the code multiplies the 16-bit allocated count:
+```c
+uint16_t new_cnt = rack->r_ctl.pcm_i.cnt_alloc * 2;
+sz = (sizeof(struct rack_pcm_stats) * new_cnt);
+n = malloc(sz, M_TCPPCM, M_NOWAIT);
+```
+When `cnt_alloc` reaches 32768 (`0x8000`), the 16-bit unsigned multiplication wraps around to `0x0000`,
+leading `malloc()` to allocate an undersized buffer `n`. However, the subsequent `memcpy()` calculates
+the copy length based on the original un-overflowed `cnt_alloc`:
+```c
+sz = (sizeof(struct rack_pcm_stats) * rack->r_ctl.pcm_i.cnt_alloc);
+memcpy(n, rack->r_ctl.pcm_s, sz); // Out-of-bounds write of ~512 KB!
+```
+This writes approximately 512 KB of remotely controlled measurement data past the allocated buffer in the slab.
+
+**PS4 Applicability: ⚠️ CONDITIONAL / HIGH IF RACK ENABLED**
+- Disclosed October 12, 2026 — completely unpatched in 14.00.
+- If RACK congestion control is compiled or selectable via `setsockopt(s, IPPROTO_TCP, TCP_CONGESTION, "rack")`,
+  this provides a remotely or locally triggerable 512 KB heap overwrite.
+
+---
+
+### 11. CVE-2026-49415 — execve(2) TOCTOU Race (Synacktiv)
 
 - **Type:** Local privilege escalation via SUID race
 - **Component:** `sys/kern/kern_exec.c` → execve(2)
@@ -336,8 +379,8 @@ while it is actively mapped into userspace, creating a dangling pointer and UAF.
 ### FreeBSD-SA-26:65.kqueue — kqueue copy-on-fork bugs
 - **Affects:** FreeBSD 15.1 only. KQUEUE_CPONFORK not in FreeBSD 9.
 
-### FreeBSD-SA-26:70.tcp — tcp_rack buffer overflow
-- **Affects:** FreeBSD 15.1 only. RACK TCP stack not in FreeBSD 9.
+### FreeBSD-SA-26:70.tcp (CVE-2026-101307) — tcp_rack PCM overflow
+- **Note:** Promoted to Section 10 as conditional vector (remote ~512KB heap OOB write if RACK module active).
 
 ### FreeBSD-SA-26:72.bhyve — bhyve bugs
 - **Affects:** bhyve hypervisor. Not present on PS4.
@@ -349,15 +392,16 @@ while it is actively mapped into userspace, creating a dangling pointer and UAF.
 | Priority | Bug | Type | Confidence | No USB needed | Unpatched in 14.00 |
 |----------|-----|------|------------|---------------|--------------------|
 | **#1** | **CVE-2026-7270 (execve OOB)** | Heap Overflow | 🔥 Very High | ✅ Yes | ✅ Confirmed (In tree since 2013) |
-| **#2** | **CVE-2026-101308 (sound UAF)**| Use-After-Free | 🔥 Very High | ✅ Yes | ✅ Confirmed (Oct 14, 2026 advisory) |
+| **#2** | **CVE-2026-101308 (sound UAF)**| Use-After-Free | 🔥 Very High | ✅ Yes | ✅ Confirmed (Oct 13-14, 2026 advisory) |
 | **#3** | **CVE-2026-58087 (semctl OOB)** | Heap R/W | 🔥 Very High | ✅ Yes | ✅ Likely (July 29, 2026) |
 | **#4** | **CVE-2026-58098 (semop OOB)**  | Heap Access | 🔥 Very High | ✅ Yes | ✅ Confirmed (Sept 29, 2026) |
 | **#5** | **CVE-2026-45251 (file poll UAF)**| Use-After-Free| 🔥 High | ✅ Yes | ✅ Likely (May 20, 2026) |
 | **#6** | **CVE-2026-58093 (tty UAF)**    | Use-After-Free | 🔥 High | ✅ Yes | ✅ Likely (August 25, 2026) |
 | **#7** | **IPMI 0-day (H4SS9M)**         | Use-After-Scope| 🔥 High | ✅ Yes | ✅ Unpatched (Private disclosure) |
-| **#8** | **CVE-2026-58094 (posixshm)**   | TOCTOU Race | ⚠️ Medium | ✅ Yes | ❓ Needs Verification |
-| **#9** | **ELF core dump OOB**           | Heap Overflow | ⚠️ Medium | ✅ Yes | ❓ Core dump enabled? |
-| **#10**| **CVE-2026-49415 (execve SUID)**| SUID Race | ⚠️ Medium | ✅ Yes | ❓ Accessible SUID binary? |
+| **#8** | **CVE-2026-101307 (tcp_rack)**  | Heap Overflow | ⚠️ Conditional| ✅ Remote / Yes| ✅ Confirmed (Oct 12, 2026 advisory) |
+| **#9** | **CVE-2026-58094 (posixshm)**   | TOCTOU Race | ⚠️ Medium | ✅ Yes | ❓ Needs Verification |
+| **#10**| **ELF core dump OOB**           | Heap Overflow | ⚠️ Medium | ✅ Yes | ❓ Core dump enabled? |
+| **#11**| **CVE-2026-49415 (execve SUID)**| SUID Race | ⚠️ Medium | ✅ Yes | ❓ Accessible SUID binary? |
 
 ## Recommended Next Steps
 
