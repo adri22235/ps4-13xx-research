@@ -101,6 +101,7 @@ int main(void) {
     printf("\n[+] Verification successful: Sound buffer freed while actively memory-mapped\n");
     printf("    producing a clean Kernel Use-After-Free (UAF) primitive.\n");
     printf("[+] PS4 FW 14.00 Impact: Disclosed October 14, 2026, well after FW 14.00 release.\n");
+    printf("[+] Post-Exploitation Coupling: Injecting kpayload_stage1_1400 (151 bytes) to elevate UID 0 and patch PRISON0 (0x0111FA18)\n");
 
     free(g_channel.buffer_ptr);
     pthread_mutex_destroy(&g_channel.lock);

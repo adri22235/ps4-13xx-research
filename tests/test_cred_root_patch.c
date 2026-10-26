@@ -12,7 +12,7 @@
  */
 
 #include <stdio.h>
-#include <stdint.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -71,12 +71,12 @@ static void apply_kernel_cred_patch(simulated_proc_t *proc, uint64_t prison0_add
     proc->p_ucred->cr_groups[0] = 0;
 
     // 2. Escape de Jail: reasignar puntero a PRISON0
-    printf("    -> Jail Break: Reasignando cr_prison (0x%016llx -> 0x%016llx)\n",
-           proc->p_ucred->cr_prison, prison0_addr);
+    printf("    -> Jail Break: Reasignando cr_prison (0x%016" PRIx64 " -> 0x%016" PRIx64 ")\n",
+           (uint64_t)proc->p_ucred->cr_prison, (uint64_t)prison0_addr);
     proc->p_ucred->cr_prison = prison0_addr;
 
     // 3. Asignar raíz del sistema de ficheros completa a rootvnode
-    printf("    -> Chroot Escape: Reasignando fd_rdir y fd_jdir -> 0x%016llx\n", rootvnode_addr);
+    printf("    -> Chroot Escape: Reasignando fd_rdir y fd_jdir -> 0x%016" PRIx64 "\n", (uint64_t)rootvnode_addr);
     proc->p_fd->fd_rdir = rootvnode_addr;
     proc->p_fd->fd_jdir = rootvnode_addr;
 }
@@ -93,10 +93,10 @@ int main(void) {
     uint64_t allproc_addr   = kbase + K1400_ALLPROC_OFFSET;
 
     printf("[1] Offsets de Arquitectura Validados para FW %s:\n", FW_VERSION);
-    printf("    Kernel Base: 0x%016llx\n", kbase);
-    printf("    PRISON0:     0x%016llx (Offset: +0x%08llx)\n", prison0_addr, K1400_PRISON0_OFFSET);
-    printf("    ROOTVNODE:   0x%016llx (Offset: +0x%08llx)\n", rootvnode_addr, K1400_ROOTVNODE_OFFSET);
-    printf("    ALLPROC:     0x%016llx (Offset: +0x%08llx)\n", allproc_addr, K1400_ALLPROC_OFFSET);
+    printf("    Kernel Base: 0x%016" PRIx64 "\n", kbase);
+    printf("    PRISON0:     0x%016" PRIx64 " (Offset: +0x%08" PRIx64 ")\n", prison0_addr, (uint64_t)K1400_PRISON0_OFFSET);
+    printf("    ROOTVNODE:   0x%016" PRIx64 " (Offset: +0x%08" PRIx64 ")\n", rootvnode_addr, (uint64_t)K1400_ROOTVNODE_OFFSET);
+    printf("    ALLPROC:     0x%016" PRIx64 " (Offset: +0x%08" PRIx64 ")\n", allproc_addr, (uint64_t)K1400_ALLPROC_OFFSET);
 
     // Configurar estructuras simuladas en memoria de prueba
     simulated_ucred_t ucred = {

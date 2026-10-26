@@ -23,6 +23,12 @@
 #define FW_VERSION "14.00"
 #define SIMULATED_KERNEL_BASE 0xFFFFFFFF82000000ULL
 
+// Offsets del Kernel para FW 14.00
+#define K1400_SYSENT_OFFSET     0x0110A760ULL  // FW 14.00 (delta +0x7BF0 respecto a 13.04: 0x01102B70)
+#define K1400_PRISON0_OFFSET    0x0111FA18ULL
+#define K1400_ROOTVNODE_OFFSET  0x02136E90ULL
+#define K1400_ALLPROC_OFFSET    0x01B28538ULL
+
 // Estructura de verificación de primitivas
 typedef struct {
     uint64_t leaked_kernel_text;
@@ -31,7 +37,7 @@ typedef struct {
     int is_kaslr_defeated;
 } kernel_rw_context_t;
 
-static volatile uint64_t g_simulated_sysent_ptr = SIMULATED_KERNEL_BASE + 0x01102B70ULL;
+static volatile uint64_t g_simulated_sysent_ptr = SIMULATED_KERNEL_BASE + K1400_SYSENT_OFFSET;
 
 /*
  * Simulación del comportamiento de semctl GETALL con nsems wrap-around
