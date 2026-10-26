@@ -1,6 +1,6 @@
 // WebKit ROP Gadgets — PS4 Firmware 14.00
 // Source: libSceNKWebKit.sprx.decrypted (67 MB)
-// Generated: 2026-10-23 20:52 by find_webkit_gadgets_1400.py
+// Generated: 2026-10-26 15:05 by find_webkit_gadgets_1400.py
 // Method: Byte pattern search (same methodology as 13.04/13.50)
 // Author: adri22235 + H4SS9M
 //

@@ -1,7 +1,7 @@
 # FreeBSD Upstream Kernel Vulnerability & Patch Sentinel
 
 > **Entidad:** García Casado Security Research  
-> **Último escaneo:** `2026-10-25 18:24:02`  
+> **Último escaneo:** `2026-10-26 15:06:08`  
 > **Commits analizados:** `75` en `5` subsistemas críticos  
 > **Alertas activas:** `24` hallazgos con patrones de fallo de memoria  
 
