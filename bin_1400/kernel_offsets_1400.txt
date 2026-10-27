@@ -1,0 +1,61 @@
+# PS4 FW 14.00 - KERNEL OFFSETS
+# Build: J02699045
+# Kernel base: 0xffffffff82200000
+# Entry point: 0xffffffff8226a410
+# Generado: análisis de 1400_ps4k.elf
+# TODOS LOS OFFSETS SON RELATIVOS A KERNEL BASE
+
+
+## copyin
+string_addr = 0xffffffff8297277f
+func_approx_0 = 0xffffffff82216ac0  # offset: 0x16ac0
+
+## copyinstr
+string_addr = 0xffffffff8297d66f
+func_approx_0 = 0xffffffff8222de2d  # offset: 0x2de2d
+func_approx_1 = 0xffffffff8222e03e  # offset: 0x2e03e
+
+## copyout
+string_addr = 0xffffffff8297b270
+func_approx_0 = 0xffffffff8221c4b6  # offset: 0x1c4b6
+
+## kern_dynlib
+string_addr = 0xffffffff82971fd5
+
+## sceKernelReleaseDirectMemory
+string_addr = 0xffffffff829c4171
+
+## sceSblAuthMgrIsLoadable
+string_addr = 0xffffffff82a08dfa
+func_approx_0 = 0xffffffff82675ac8  # offset: 0x475ac8
+
+## sceSblAuthMgrLoadSelfBlock
+string_addr = 0xffffffff82cece64
+
+## sceSblAuthMgrSmIsLoadable2
+string_addr = 0xffffffff82ced5ef
+
+## sceSblAuthMgrSmLoadSelfBlock
+string_addr = 0xffffffff82ced661
+
+## sceSblKeymgrSmCallfuncWithID
+string_addr = 0xffffffff82ce98c5
+
+## sceSblPfsSaveDataUpdateAuthCode
+string_addr = 0xffffffff82ce8d6c
+func_approx_0 = 0xffffffff828222a0  # offset: 0x6222a0
+func_approx_1 = 0xffffffff828224e1  # offset: 0x6224e1
+func_approx_2 = 0xffffffff8282254f  # offset: 0x62254f
+
+## sceSblServiceMailbox
+string_addr = 0xffffffff82cea92e
+func_approx_0 = 0xffffffff8283056d  # offset: 0x63056d
+func_approx_1 = 0xffffffff8283056d  # offset: 0x63056d
+
+## sceSblServiceRequest
+string_addr = 0xffffffff82cea817
+
+
+# NOTA: Estas direcciones son APROXIMADAS.
+# Para offsets exactos, cargar en Ghidra con base 0xffffffff82200000
+# y verificar cada función con el auto-análisis.
